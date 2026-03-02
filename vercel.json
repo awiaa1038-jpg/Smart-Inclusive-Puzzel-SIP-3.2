@@ -4,7 +4,6 @@
   "framework": null,
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/favicon.png", "destination": "/public/favicon.png" },
     { "source": "/((?!.*\\..*|_next).*)", "destination": "/index.html" }
   ]
 }
