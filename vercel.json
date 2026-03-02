@@ -12,7 +12,5 @@
       "source": "/((?!.*\\..*|_next).*)",
       "destination": "/index.html"
     }
-  ],
-  "public": false
+  ]
 }
-
