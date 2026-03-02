@@ -1,7 +1,14 @@
-Temp folder for static public assets.
+Folder untuk static assets yang akan dipublikasikan di root Vercel.
 
-Please place the favicon image you uploaded here and name it exactly: favicon.png
+FILE: favicon.png
+- Sudah ada placeholder favicon.png di folder ini
+- GANTI dengan favicon Anda jika ingin custom design
+- Path akses di browser: /favicon.png (bukan /public/favicon.png)
+- Ukuran ideal: 180x180px atau lebih (square ratio)
+- Format: PNG dengan transparent background
 
-Recommended favicon sizes: 16x16, 32x32, 180x180 (for Apple). A square PNG with 72-180px side is fine; the same file will be used for all tags.
+Catatan Vercel:
+- Semua file di folder /public akan dipublikasikan sebagai static files
+- Akses dari HTML: gunakan /filename.png (tanpa /public/)
+- Vercel akan serve langsung dari root domain
 
-After placing the real image, you may remove this README.
