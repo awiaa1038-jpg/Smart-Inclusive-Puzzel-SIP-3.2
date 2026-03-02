@@ -1037,6 +1037,8 @@ let micPermissionGranted=false;
 let waitingForAnswer=false;
 let currentPieceAnswer="";
 const synth=window.speechSynthesis;
+let isSpeaking=false;
+let microphone=null;
 
 // ═══════════════════════════════════════════════════════════════════
 //  STARS
@@ -1054,133 +1056,247 @@ function buildStars(){
 buildStars();
 
 // ═══════════════════════════════════════════════════════════════════
-//  SPEECH SYNTHESIS - FASTER RATE
+//  VOICE ASSISTANT - MODULAR ARCHITECTURE
 // ═══════════════════════════════════════════════════════════════════
-function speak(txt, onDone){
-  if(muted){if(onDone)onDone();return;}
-  synth.cancel();
-  const u=new SpeechSynthesisUtterance(txt);
-  u.lang='id-ID';u.rate=1.15;u.pitch=1.05;
-  const voices=synth.getVoices();
-  const idv=voices.find(v=>v.lang.startsWith('id'));
-  if(idv)u.voice=idv;
-  u.onstart=()=>{
-    document.getElementById('aiAv').classList.add('talking');
-    document.getElementById('waves').classList.add('active');
-  };
-  u.onend=u.onerror=()=>{
-    document.getElementById('aiAv').classList.remove('talking');
-    document.getElementById('waves').classList.remove('active');
-    if(onDone)onDone();
-  };
-  synth.speak(u);
+
+// Initialize microphone only once at app load
+async function initMicrophone() {
+  if (micPermissionGranted) return true;
+  try {
+    microphone = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+    micPermissionGranted = true;
+    return true;
+  } catch (err) {
+    console.log('Microphone permission denied:', err);
+    toast('Izin mikrofon ditolak! Silakan izinkan di browser.', 5000);
+    say('Maaf, izin mikrofon ditolak. Silakan izinkan akses mikrofon di browser kamu.', null);
+    return false;
+  }
 }
-function say(txt,onDone){setMsg(txt);speak(txt,onDone);}
-function setMsg(t){document.getElementById('aiMsg').textContent=t;}
 
-if(synth.onvoiceschanged!==undefined)synth.onvoiceschanged=()=>synth.getVoices();
-
-// ═══════════════════════════════════════════════════════════════════
-//  SPEECH RECOGNITION - ALWAYS ACTIVE AFTER PERMISSION
-// ═══════════════════════════════════════════════════════════════════
-function setupRecognition(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){toast('Browser tidak mendukung Speech Recognition. Gunakan Chrome/Edge.',5000);return false;}
-  recognition=new SR();
-  recognition.lang='id-ID';
-  recognition.continuous=true;
-  recognition.interimResults=true;
-  recognition.onresult=(e)=>{
-    let final='',interim='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal) final+=e.results[i][0].transcript;
-      else interim+=e.results[i][0].transcript;
-    }
-    const disp=final||interim;
-    document.getElementById('voiceTranscript').textContent=disp;
-    if(final) handleVoiceInput(final.trim().toLowerCase());
+// Setup Speech Recognition once
+function setupRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    toast('Browser tidak mendukung Speech Recognition. Gunakan Chrome/Edge.', 5000);
+    return false;
+  }
+  recognition = new SR();
+  recognition.lang = 'id-ID';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  
+  recognition.onstart = () => {
+    console.log('[Recognition] Started');
   };
-  recognition.onerror=(e)=>{
-    if(e.error==='no-speech')return;
-    console.log('Speech error:',e.error);
-    if(e.error==='not-allowed'){
+  
+  recognition.onresult = (e) => {
+    let final = '', interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    const disp = final || interim;
+    document.getElementById('voiceTranscript').textContent = disp;
+    if (final) {
+      handleVoiceInput(final.trim().toLowerCase());
+    }
+  };
+  
+  recognition.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    console.log('Speech error:', e.error);
+    if (e.error === 'not-allowed') {
+      micOn = false;
+      micPermissionGranted = false;
       setMicStatus(false);
-      micPermissionGranted=false;
-      toast('Izin mikrofon ditolak!',4000);
+      toast('Izin mikrofon ditolak!', 4000);
     }
   };
-  recognition.onend=()=>{
-    // Restart recognition if mic is still on
-    if(micOn && micPermissionGranted){
-      setTimeout(()=>{
-        try{recognition.start();}catch(e){console.log('Restart failed:',e);}
-      },100);
+  
+  recognition.onend = () => {
+    console.log('[Recognition] Ended');
+    // Only auto-restart if:
+    // 1. Mic is on
+    // 2. Permission is granted
+    // 3. We're not currently speaking (isSpeaking = false)
+    if (micOn && micPermissionGranted && !isSpeaking && recActive) {
+      setTimeout(() => {
+        try {
+          startListening();
+        } catch (e) {
+          console.log('Auto-restart failed:', e);
+        }
+      }, 300);
     }
   };
+  
   return true;
 }
 
-function setMicStatus(on){
-  micOn=on;
-  const badge=document.getElementById('micBadge');
-  const label=document.getElementById('micLabel');
-  const btn=document.getElementById('micBtn');
-  if(on){
-    badge.className='mic-badge on';
-    label.textContent='Mic ON — Aktif!';
-    btn.innerHTML='<i class="fas fa-microphone"></i> Mic ON';
-    document.getElementById('aiAv').classList.remove('listening');
-    document.getElementById('voiceBox').classList.add('show');
-    document.getElementById('aiAv').classList.add('listening');
-  } else {
-    badge.className='mic-badge off';
-    label.textContent='Mic OFF — Ketuk untuk aktifkan';
-    btn.innerHTML='<i class="fas fa-microphone-slash"></i> Mic OFF';
-    document.getElementById('voiceBox').classList.remove('show');
-    document.getElementById('aiAv').classList.remove('listening');
+// Start listening - only when AI is not speaking
+function startListening() {
+  if (!recognition) {
+    console.warn('[startListening] Recognition not initialized');
+    return;
+  }
+  if (isSpeaking) {
+    console.log('[startListening] Skipped - AI is speaking');
+    return;
+  }
+  if (!micOn || !micPermissionGranted) {
+    console.log('[startListening] Skipped - Mic off or no permission');
+    return;
+  }
+  try {
+    recognition.start();
+    recActive = true;
+    console.log('[startListening] Recognition started');
+  } catch (e) {
+    console.log('[startListening] Error:', e);
   }
 }
 
-async function toggleMic(){
-  if(micOn){
-    micOn=false;recActive=false;
-    if(recognition)recognition.stop();
-    setMicStatus(false);
-    say(getRandomResponse('bye'),null);
+// Stop listening - when AI starts speaking
+function stopListening() {
+  if (!recognition) return;
+  try {
+    recognition.stop();
+    recActive = false;
+    console.log('[stopListening] Recognition stopped');
+  } catch (e) {
+    console.log('[stopListening] Error:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SPEECH SYNTHESIS - WITH BUILT-IN ECHO PREVENTION
+// ═══════════════════════════════════════════════════════════════════
+function speak(txt, onDone) {
+  if (muted) {
+    if (onDone) onDone();
     return;
   }
   
-  // If permission already granted, just start
-  if(micPermissionGranted){
-    if(!recognition){
-      const ok=setupRecognition();
-      if(!ok)return;
+  // Stop listening before speaking
+  stopListening();
+  isSpeaking = true;
+  
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(txt);
+  u.lang = 'id-ID';
+  u.rate = 1.15;
+  u.pitch = 1.05;
+  
+  const voices = synth.getVoices();
+  const idv = voices.find(v => v.lang.startsWith('id'));
+  if (idv) u.voice = idv;
+  
+  u.onstart = () => {
+    document.getElementById('aiAv').classList.add('talking');
+    document.getElementById('waves').classList.add('active');
+  };
+  
+  u.onend = u.onerror = () => {
+    document.getElementById('aiAv').classList.remove('talking');
+    document.getElementById('waves').classList.remove('active');
+    
+    // Set isSpeaking=false and wait 500ms before restarting microphone
+    isSpeaking = false;
+    
+    if (onDone) {
+      onDone();
     }
-    micOn=true;recActive=true;
-    try{recognition.start();}catch(e){}
+    
+    // Only restart listening after delay if mic is on
+    if (micOn && micPermissionGranted && recActive) {
+      setTimeout(() => {
+        startListening();
+      }, 500);
+    }
+  };
+  
+  synth.speak(u);
+}
+
+function say(txt, onDone) {
+  setMsg(txt);
+  speak(txt, onDone);
+}
+
+function setMsg(t) {
+  document.getElementById('aiMsg').textContent = t;
+}
+
+if (synth.onvoiceschanged !== undefined) {
+  synth.onvoiceschanged = () => synth.getVoices();
+}
+
+function setMicStatus(on) {
+  micOn = on;
+  const badge = document.getElementById('micBadge');
+  const label = document.getElementById('micLabel');
+  const btn = document.getElementById('micBtn');
+  if (on) {
+    badge.className = 'mic-badge on';
+    label.textContent = 'Mic ON — Aktif!';
+    btn.innerHTML = '<i class="fas fa-microphone"></i> Mic ON';
+    document.getElementById('aiAv').classList.remove('listening');
+    document.getElementById('voiceBox').classList.add('show');
+    document.getElementById('aiAv').classList.add('listening');
+    startListening();
+  } else {
+    badge.className = 'mic-badge off';
+    label.textContent = 'Mic OFF — Ketuk untuk aktifkan';
+    btn.innerHTML = '<i class="fas fa-microphone-slash"></i> Mic OFF';
+    document.getElementById('voiceBox').classList.remove('show');
+    document.getElementById('aiAv').classList.remove('listening');
+    stopListening();
+  }
+}
+
+async function toggleMic() {
+  if (micOn) {
+    // Turn off microphone
+    micOn = false;
+    recActive = false;
+    stopListening();
+    setMicStatus(false);
+    say(getRandomResponse('bye'), null);
+    return;
+  }
+  
+  // Turn on microphone
+  // Check if permission already granted
+  if (micPermissionGranted) {
+    if (!recognition) {
+      const ok = setupRecognition();
+      if (!ok) return;
+    }
     setMicStatus(true);
-    say(getRandomResponse('greetings'),null);
+    say(getRandomResponse('greetings'), null);
     return;
   }
   
-  // First time - ask for permission
-  try{
-    await navigator.mediaDevices.getUserMedia({audio:true});
-    micPermissionGranted=true;
-  } catch(err){
-    toast('Izin mikrofon ditolak! Silakan izinkan di browser.',5000);
-    say('Maaf, izin mikrofon ditolak. Silakan izinkan akses mikrofon di browser kamu.',null);
+  // First time - request permission
+  const permissionOk = await initMicrophone();
+  if (!permissionOk) {
     return;
   }
   
-  if(!recognition){
-    const ok=setupRecognition();
-    if(!ok)return;
+  if (!recognition) {
+    const ok = setupRecognition();
+    if (!ok) return;
   }
-  micOn=true;recActive=true;
-  try{recognition.start();}catch(e){}
+  
   setMicStatus(true);
-  say(getRandomResponse('greetings'),null);
+  say(getRandomResponse('greetings'), null);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1759,10 +1875,20 @@ function showFireworks(){
 
 function enterApp(){
   document.getElementById('welcomeOverlay').classList.add('fade-out');
-  setTimeout(()=>{
-    document.getElementById('welcomeOverlay').style.display='none';
-    toggleMic();
-  },800);
+  setTimeout(async () => {
+    document.getElementById('welcomeOverlay').style.display = 'none';
+    
+    // Initialize microphone on app load (only once)
+    const ok = await initMicrophone();
+    if (ok) {
+      // Setup recognition if permission granted
+      if (!recognition) {
+        setupRecognition();
+      }
+      // Now toggle mic to start listening
+      toggleMic();
+    }
+  }, 800);
 }
 
 // Handle window resize
