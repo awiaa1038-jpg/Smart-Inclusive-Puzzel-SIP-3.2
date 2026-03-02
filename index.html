@@ -6,6 +6,13 @@
 <title>Smart Inclusive Puzzle (SIP)</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Favicons & theme for modern browsers -->
+  <link rel="icon" type="image/png" sizes="32x32" href="/public/favicon.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/public/favicon.png">
+  <link rel="apple-touch-icon" href="/public/favicon.png">
+  <meta name="theme-color" content="#00D4FF">
+
 <style>
 :root{
   --white:#ffffff;
@@ -1349,6 +1356,52 @@ function handleVoiceInput(text){
   }
   if(text.includes('bantuan')||text.includes('help')||text.includes('tolong')){
     say(getRandomResponse('help'),null);return;
+  }
+
+  // Support voice command to toggle mic (so user can say e.g. "aktifkan mic", "matikan mic")
+  const micOnCmds = ["nyalakan mic","aktifkan mic","hidupkan mic","nyalakan mikrofon","aktifkan mikrofon","hidupkan mikrofon","mic on","turn on mic"];
+  const micOffCmds = ["matikan mic","nonaktifkan mic","matikan mikrofon","matikan mikrofon","matikan mic","mic off","turn off mic"];
+  for (const cmd of micOnCmds) {
+    if (text.includes(cmd)) {
+      if (!micOn) { toggleMic(); return; }
+      else { say('Mikrofon sudah aktif.', null); return; }
+    }
+  }
+  for (const cmd of micOffCmds) {
+    if (text.includes(cmd)) {
+      if (micOn) { toggleMic(); return; }
+      else { say('Mikrofon sudah tidak aktif.', null); return; }
+    }
+  }
+
+  // "Bacakan ulang soal di kepingan X" - user can ask to reread question of a specific piece
+  // Patterns: "bacakan ulang soal kepingan 3", "ulang soal di kepingan nomor 5", etc.
+  const repeatMatch = text.match(/(?:bacakan ulang|ulang|ulangi)\s*(?:soal)?(?:\s*(?:di|pada))?\s*(?:kepingan\s*(?:nomor\s*)?)?(\d{1,2})/i);
+  if (repeatMatch && repeatMatch[1]) {
+    const pid = parseInt(repeatMatch[1], 10);
+    if (!pid || pid < 1 || pid > PIECES.length) {
+      say('Nomor kepingan tidak valid.', null);
+      return;
+    }
+    if (placed[pid]) {
+      say(`Kepingan ${pid} sudah dipasang, tidak bisa dibacakan ulang.`, null);
+      return;
+    }
+    const p = PIECES.find(x => x.id === pid);
+    if (!p) { say('Maaf, saya tidak menemukan kepingan tersebut.', null); return; }
+    // set current highlight and waiting state similar to readNext
+    if (curHighlight) {
+      const prev = document.getElementById(`pc-${curHighlight}`);
+      if (prev) prev.classList.remove('current');
+    }
+    curHighlight = pid;
+    const pc = document.getElementById(`pc-${pid}`);
+    if (pc && !placed[pid]) { pc.classList.add('current'); pc.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+    waitingForAnswer = true;
+    currentPieceAnswer = p.a;
+    const msg = `Kepingan nomor ${pid}. Soalnya: ${p.hint} sama dengan berapa? Ucapkan jawabanmu!`;
+    say(msg, null);
+    return;
   }
 
   // Quiz answer (check if modal is open)
