@@ -1040,6 +1040,14 @@ const synth=window.speechSynthesis;
 let isSpeaking=false;
 let microphone=null;
 
+// set up mic/recognition once when the page is ready; this triggers
+// a permission request but only the first time, and ensures the
+// objects exist before the user tries to toggle the mic.
+window.addEventListener('DOMContentLoaded', async () => {
+  await initMicrophone();
+  setupRecognition();
+});
+
 // ═══════════════════════════════════════════════════════════════════
 //  STARS
 // ═══════════════════════════════════════════════════════════════════
@@ -1097,6 +1105,12 @@ function setupRecognition() {
   };
   
   recognition.onresult = (e) => {
+    // ignore anything captured while synth is speaking
+    if (isSpeaking) {
+      console.log('[Recognition] result ignored while AI speaking');
+      return;
+    }
+
     let final = '', interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
@@ -1122,11 +1136,14 @@ function setupRecognition() {
   
   recognition.onend = () => {
     console.log('[Recognition] Ended');
-    // Only auto-restart if:
-    // 1. Mic is on
-    // 2. Permission is granted
-    // 3. We're not currently speaking (isSpeaking = false)
-    if (micOn && micPermissionGranted && !isSpeaking && recActive) {
+    recActive = false;
+
+    // auto-restart as long as the mic is supposed to be on and
+    // we aren't in the middle of speaking; recActive is deliberately
+    // NOT required here because stopListening() will set it false
+    // before we begin talking and we still want to come back once
+    // the speech has finished.
+    if (micOn && micPermissionGranted && !isSpeaking) {
       setTimeout(() => {
         try {
           startListening();
@@ -1141,19 +1158,26 @@ function setupRecognition() {
 }
 
 // Start listening - only when AI is not speaking
-function startListening() {
+async function startListening() {
   if (!recognition) {
     console.warn('[startListening] Recognition not initialized');
     return;
   }
+
+  // guard conditions
   if (isSpeaking) {
     console.log('[startListening] Skipped - AI is speaking');
     return;
   }
-  if (!micOn || !micPermissionGranted) {
-    console.log('[startListening] Skipped - Mic off or no permission');
+  if (!micOn) {
+    console.log('[startListening] Skipped - Mic turned off');
     return;
   }
+  if (!micPermissionGranted) {
+    const ok = await initMicrophone();
+    if (!ok) return;
+  }
+
   try {
     recognition.start();
     recActive = true;
@@ -1207,15 +1231,14 @@ function speak(txt, onDone) {
     document.getElementById('aiAv').classList.remove('talking');
     document.getElementById('waves').classList.remove('active');
     
-    // Set isSpeaking=false and wait 500ms before restarting microphone
+    // speaking is finished
     isSpeaking = false;
-    
     if (onDone) {
       onDone();
     }
     
-    // Only restart listening after delay if mic is on
-    if (micOn && micPermissionGranted && recActive) {
+    // always restart listener if mic was supposed to be on
+    if (micOn && micPermissionGranted) {
       setTimeout(() => {
         startListening();
       }, 500);
@@ -1303,6 +1326,12 @@ async function toggleMic() {
 //  VOICE INPUT HANDLER - ENHANCED & RESPONSIVE
 // ═══════════════════════════════════════════════════════════════════
 function handleVoiceInput(text){
+  // ignore any results captured while assistant was speaking
+  if (isSpeaking) {
+    console.log('[handleVoiceInput] ignored because AI was speaking');
+    return;
+  }
+
   // Global commands
   if(text.includes('mulai')||text.includes('start')){
     if(!started){startGame();return;}
